@@ -1,0 +1,59 @@
+name: s3Notifier
+
+on:
+  workflow_dispatch:
+    inputs:
+      cdkTask:
+        description: 'CDK operation'
+        required: true
+        default: 'deploy'
+      awsRegion:
+        description: 'AWS region for cdk operations'
+        required: true
+        default: 'us-west-2'
+
+jobs:
+  cdkActions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone Repository
+        uses: actions/checkout@v2
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.8'
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Test with pytest
+        run: |
+          pytest
+      - name: Bootstrap CDK
+        uses: scottbrenner/aws-cdk-action@master
+        if: github.event.inputs.cdkTask == 'deploy'
+        with:
+          args: bootstrap
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ github.event.inputs.awsRegion }}
+      - name: Run CDK operation
+        uses: youyo/aws-cdk-github-actions@v2
+        with:
+          cdk_subcommand: ${{ github.event.inputs.cdkTask }} --force
+          actions_comment: false
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ github.event.inputs.awsRegion }}
+      - name: Cleanup Bootstrap
+        if: github.event.inputs.cdkTask == 'destroy'
+        run: |
+          aws s3 rb --force s3://$(aws s3 ls | grep cdktoolkit | cut -d' ' -f3)
+          aws cloudformation delete-stack --stack-name CDKToolkit
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ github.event.inputs.awsRegion }}
+
